@@ -22,9 +22,8 @@ def ndc_marketscan_format(ndc):
 
 def import_codes(study=None):
     assert isinstance(study, heor_study) 
-    Dir = "/home/yaser/workspace/heor_rwe_phase_4/study0000_python"
 
-    in_scd_loc = Dir + "/datain/scd/"
+    in_scd_loc = study.proj_dir + "/datain/scd/"
 
     #Saving ICD9-CM Codes
     scd_ICD9 = pd.read_excel(in_scd_loc+"study_codes_excel.xlsx", sheet_name='Study Code_ICD9', dtype = str)
