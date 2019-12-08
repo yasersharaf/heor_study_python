@@ -8,16 +8,20 @@
 # MODIFICATION:       Use the existing table extraction macros with suggested macro statements
 # *********************************************************************************'''
 
-study_HCPCS = scd_HCPCS['HCPCS'].to_list()
-study_NDC = scd_NDC['NDC'].to_list()
+study_ndc = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
+study_hcpcs = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
 
-print("study hcpcs: ", *study_HCPCS)
-print("study ndc: "  , *study_NDC)
+print("study hcpcs: ", *study_hcpcs)
+print("study ndc: "  , *study_ndc)
 
 
-/*identify use of biologics of interest with HCPCS*/
-%IdRxPT(dbLib = raw,SCOPE = ("S","O"), stDt = &study_start, edDt = &study_end, code = study_hcpcs , outDsn = interestDS_SO);
-
+# identify use of biologics of interest with HCPCS
+# %IdRxPT(dbLib = raw,SCOPE = ("S","O"), stDt = &study_start, edDt = &study_end, code = study_hcpcs , outDsn = interestDS_SO);
+dxVar = 'pdx dx1 dx2'
+total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s,o",
+                        codes=study_ndc, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end,
+                        outDsn=interestDS_SO)
+    
 
 /*identify use of biologics of interest with NDC*/
 %IdRxPT(dbLib = raw,SCOPE = ("D"), stDt = &study_start, edDt = &study_end, code = study_ndc , outDsn = interestDS_D);

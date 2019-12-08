@@ -11,7 +11,7 @@ import traceback
 import sys
 
 
-def execute_n_drop(conn_or_cur=None, sql_expr="" , if_exists='replace'):
+def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
     try:
         conn_or_cur.execute(sql_expr)
     except sqlite3.OperationalError:
@@ -26,10 +26,10 @@ def execute_n_drop(conn_or_cur=None, sql_expr="" , if_exists='replace'):
                 if f"DROP TABLE IF EXISTS {new_table_name_upcase}" not in sql_expr_upper:
                     print(f"""Note: Consider executing the expression \n "DROP TABLE IF EXISTS {new_table_name};"  """)
                     if if_exists == 'replace':
-                        conn_or_cur.executescript(f"DROP TABLE IF EXISTS {new_table_name};"+sql_expr)
-
-
-
+                        sql_expr_drop = f"DROP TABLE IF EXISTS {new_table_name};"
+                        print(f"Ececuting: \n{sql_expr_drop}\n first.")
+                        conn_or_cur.execute(sql_expr_drop)
+                        conn_or_cur.execute(sql_expr)
 
 
 def sql_list_table_columns(db_conn=None, db_tb_name=None):
@@ -56,9 +56,12 @@ def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
 
 #IdDxPT record extraction *******************'''
 def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt=None, edDt=None,\
-           dxVar = None, code=None,  outDsn='outDsn'):
+           dxVar = None, codes=None,  outDsn='outDsn'):
     # TODO: Add dxVar condition
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
+    
+    print("codes:", codes)
+
     # , stDt = stDt, edDt = edDt
     print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
     if stDt is None:
@@ -75,13 +78,40 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
             print(table_name)
             table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
             all_columns = all_columns + \
-                [col for col in table_col if col not in all_columns]
-        for table_name in table_list:
-            table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
-            sql_select_list.append(
-f'''SELECT {', '.join([col if col in table_col else '   NULL AS ' + col  for col in all_columns])}, '{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name}
-    WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
-''')
+                [col.lower() for col in table_col if col.lower() not in all_columns]     
+        sql_args = {'table_alias': '',
+                    'column_prefix': '',
+                    'on_clause': ''}
+    
+        if codes:
+            if not dxVar:
+                raise ValueError('Either both dxVar and codes must be provided or none.')
+            if isinstance(codes,str):
+                codes = codes.split()
+            if isinstance(dxVar,str):
+                dxVar = dxVar.split()
+            df_code = pd.DataFrame(codes, columns = ['dx'])
+            df_code_ds = 'dx_list'
+            df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
+            
+        for table_name,table_num in zip(table_list,range(len(table_name))):
+            if codes:
+                table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
+                sql_args['column_prefix'] = 'a' + str(table_num) + '.'
+                sql_args['table_alias'] = 'AS ' + sql_args['column_prefix'][0:-1]
+                sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.dx) > 0" \
+                                                             for join_col in [col.lower() for col in dxVar if col.lower() in [col2.lower() for col2 in table_col]]])
+                sql_args['join clause'] = f'INNER JOIN {df_code_ds} AS b{table_num}' 
+            sql_select_list.append(\
+                f'''SELECT {', '.join([sql_args['column_prefix'] + col if col in [col2.lower() for col2 in table_col] 
+                                                                       else '   NULL AS ' + col  for col in all_columns])},
+'{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name} {sql_args['table_alias']}
+                {sql_args['join clause']}
+                {sql_args['on_clause']}                                                       
+                WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
+            ''')
+
+        
 
         sql_id_dx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
         print(sql_id_dx)

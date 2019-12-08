@@ -19,7 +19,7 @@ from IdDxPT_IdRxPT import *
 
 
 
-chunksize = 1*10**3
+chunksize = 1*10**2
 def sas7bdat2sql(sas_file, db_conn=None, chunksize=10**4, if_exists='replace'):
     '''# Should be in try catch block'''
     df = pd.read_sas(sas_file, encoding='latin-1', chunksize=chunksize)
@@ -286,6 +286,26 @@ if __name__ == "__main__":
     print(df)
 
     # 02_filter->idDxPt
+    codes = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
+    dxVar = 'pdx dx1 dx2'
+    total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s,o",
+                        codes=codes, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end)
+    
+    from timeit import default_timer as timer
+    execution_time = timer()
 
-    total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s,o")
+    execute_n_drop(conn_or_cur=c, 
+                   sql_expr='''create table dummy11 as select a.* from outDsn as a
+                                inner join scd.icd9 as b
+                                on instr(a.dx1,b.icd9) > 0
+                                ''', if_exists='replace')
+    # compare it with on a.DX1 like '%' || b.icd9 || '%'
+    print(pd.read_sql_query('select count(*) from dummy11',s.db))
 
+    
+    #s.db.commit()
+    execution_time = timer() - execution_time
+    print(execution_time)
+
+
+    
