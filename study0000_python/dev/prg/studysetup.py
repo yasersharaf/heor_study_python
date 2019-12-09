@@ -15,7 +15,7 @@ util_dir = os.path.join(proj_dir,'util')
 sys.path.append(util_dir)
 print(f"The study directory is {proj_dir}")
 
-from IdDxPT_IdRxPT import *
+from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPt
 
 
 
@@ -232,7 +232,7 @@ class heor_study():
 if __name__ == "__main__":
     pass
     import os
-    from studysetup import  heor_study
+    # from studysetup import  heor_study
     s = heor_study(proj_dir=proj_dir)
     c = s.db.cursor()
     

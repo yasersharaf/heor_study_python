@@ -10,6 +10,14 @@ import sqlite3
 import traceback
 import sys
 
+def low_case_str_list(l):
+    assert  isinstance(l, list)
+    return [item.lower() for item in l]
+
+def str_to_list(str_or_list=[]):
+    if isinstance(str_or_list, str):
+        str_or_list.replace(",", " ")
+        str_or_list = str_or_list.strip()
 
 def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
     try:
@@ -31,6 +39,14 @@ def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
                         conn_or_cur.execute(sql_expr_drop)
                         conn_or_cur.execute(sql_expr)
 
+def get_union_columns(db_conn=None, dbLib=None, table_list=None):
+    all_columns = []
+    for table_name in table_list:
+        print(table_name)
+        table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
+        all_columns = all_columns + \
+            [col.lower() for col in table_col if col.lower() not in all_columns]
+    return all_columns
 
 def sql_list_table_columns(db_conn=None, db_tb_name=None):
     '''
@@ -44,11 +60,8 @@ def sql_list_table_columns(db_conn=None, db_tb_name=None):
 def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
     # TODO: , stDt=None, edDt=None
 
-
-    if isinstance(dbList,str):
-        dbList = dbList.split(',')
-    if isinstance(scope,str):
-        scope = scope.split(',')
+    dbList = str_to_list(dbList)
+    scope = str_to_list(scope)
     
     df_tables = pd.read_sql_query(f"SELECT * FROM {dbLib}.sqlite_master WHERE type='table';", db_conn)
     table_list = [ds for ds in df_tables['name'].tolist() if (ds[0:4] in dbList and ds[4] in scope)]
@@ -57,12 +70,11 @@ def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
 #IdDxPT record extraction *******************'''
 def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt=None, edDt=None,\
            dxVar = None, codes=None,  outDsn='outDsn'):
-    # TODO: Add dxVar condition
+
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
     
     print("codes:", codes)
 
-    # , stDt = stDt, edDt = edDt
     print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
     if stDt is None:
         stDt = pd.Timestamp(year=1970,month=1,day=1)
@@ -70,31 +82,22 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
         edDt = pd.Timestamp(year=2070,month=1,day=1)
     
     sql_select_list = []
-    all_columns = []
     #Append the datasets*/
-    if len(table_list) > 0:
-
-        for table_name in table_list:
-            print(table_name)
-            table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
-            all_columns = all_columns + \
-                [col.lower() for col in table_col if col.lower() not in all_columns]     
+    if len(table_list) > 0:   
         sql_args = {'table_alias': '',
                     'column_prefix': '',
                     'on_clause': ''}
-    
-        if codes:
-            if not dxVar:
+        all_columns = get_union_columns(db_conn=db_conn, dbLib=dbLib, table_list=table_list)
+        if codes or dxVar:
+            if not (codes and dxVar)
                 raise ValueError('Either both dxVar and codes must be provided or none.')
-            if isinstance(codes,str):
-                codes = codes.split()
-            if isinstance(dxVar,str):
-                dxVar = dxVar.split()
+            codes = str_to_list(codes)
+            dxVar = str_to_list(dxVar)
             df_code = pd.DataFrame(codes, columns = ['dx'])
             df_code_ds = 'dx_list'
             df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
             
-        for table_name,table_num in zip(table_list,range(len(table_name))):
+        for table_name, table_num in zip(table_list, range(len(table_list))):
             if codes:
                 table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
                 sql_args['column_prefix'] = 'a' + str(table_num) + '.'
@@ -111,7 +114,6 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
                 WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
             ''')
 
-        
 
         sql_id_dx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
         print(sql_id_dx)
@@ -137,41 +139,78 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
 
 
 # #IdRxPT record extraction *******************'''
-# %MACRO IdRxPT(dbLib = , dbList = ("CCAE","MDCR"), SCOPE = , stDt =, edDt =, code = ,  outDsn =);
-#     PROC SQL NOPRINT;
-#     %put dblist is  %UPCASE(&dbList);
-#     SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
-#     WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
-#         AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
-#         %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
-#         %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
-#         %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
+def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt=None, edDt=None,\
+           rxVar = None, codes=None,  outDsn='outDsn'):
 
-#     ORDER BY MEMNAME DESC
-#     ;;
-#     QUIT;
-#     %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
-#     %put &LIST_NAME;
-#     #Append the datasets*/
-#     data &outDsn;
-#     set &LIST_NAME indsname = source; 
-#     where 1
-#     %if &stDt ne %then %do; and &stDt <= svcDate %end;
-#     %if &edDt ne %then %do; and svcDate <= &edDt %end;
-#     ;
-# #add a variable indicating table name and its scope */
-#     tbname = scan(source,2,'.');
-#     scope = substr(tbname,5,1);
-#     %if &code ne %then %do;
-#     if upcase(SCOPE) in ("O","S") then do;
-#         if proc1 in (&&&code) then output;
-#     end; 
-#     if upcase(SCOPE) in ("D") then do;
-#         if ndcnum in (&&&code) then output;
-#     end; 
-#     %end;
-#     run;
-# %MEND;
+    table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
+    
+    print("codes:", codes)
+
+    print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
+    if stDt is None:
+        stDt = pd.Timestamp(year=1970,month=1,day=1)
+    if edDt is None:
+        edDt = pd.Timestamp(year=2070,month=1,day=1)
+    
+    sql_select_list = []
+    all_columns = []
+    #Append the datasets*/
+    if len(table_list) > 0:
+
+        for table_name in table_list:
+            print(table_name)
+            table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
+            all_columns = all_columns + \
+                [col.lower() for col in table_col if col.lower() not in all_columns]     
+        sql_args = {'table_alias': '',
+                    'column_prefix': '',
+                    'on_clause': ''}
+    
+        if codes or rxVar:
+            if not (codes and rxVar)
+                raise ValueError('Either both rxVar and codes must be provided or none.')
+            codes = str_to_list(codes)
+            dxVar = str_to_list(dxVar)
+            df_code = pd.DataFrame(codes, columns = ['dx'])
+            df_code_ds = 'dx_list'
+            df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
+
+
+
+'''    PROC SQL NOPRINT;
+    %put dblist is  %UPCASE(&dbList);
+    SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
+    WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
+        AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
+        %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
+        %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
+        %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
+
+    ORDER BY MEMNAME DESC
+    ;;
+    QUIT;
+    %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
+    %put &LIST_NAME;
+    #Append the datasets*/
+    data &outDsn;
+    set &LIST_NAME indsname = source; 
+    where 1
+    %if &stDt ne %then %do; and &stDt <= svcDate %end;
+    %if &edDt ne %then %do; and svcDate <= &edDt %end;
+    ;
+#add a variable indicating table name and its scope */
+    tbname = scan(source,2,'.');
+    scope = substr(tbname,5,1);
+    %if &code ne %then %do;
+    if upcase(SCOPE) in ("O","S") then do;
+        if proc1 in (&&&code) then output;
+    end; 
+    if upcase(SCOPE) in ("D") then do;
+        if ndcnum in (&&&code) then output;
+    end; 
+    %end;
+    run;
+%MEND; '''
 
 
 
