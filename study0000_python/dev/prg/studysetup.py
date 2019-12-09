@@ -23,16 +23,20 @@ def sas7bdat2sql(sas_file_path, db_conn=None, chunksize=10**3, if_exists='replac
     ds_name = sas_file.split('.')[0]
     print(f"\n\nReading {df.row_count} records from {sas_file} table ...")
     read_so_far = 0
-    for df_chunk in df:
-        # print(df.info())
-        # print(f"if_exists: {if_exists}")
-        df_chunk.to_sql(ds_name, db_conn, if_exists=if_exists, index=False)
-        # if it did not fail, it will append the rest. 
-        if_exists = 'append'
-        read_so_far += df_chunk.shape[0]
-        sys.stdout.write('\r')
-        sys.stdout.write(f"\t Read {read_so_far/df.row_count*100:.2f}% records to sql table {ds_name}")
-
+    from tqdm import tqdm
+    
+    with tqdm(total=df.row_count, desc=f"Transferring records to sql table {ds_name}", bar_format="{l_bar}{bar} [ time left: {remaining} ]") as pbar:
+        while read_so_far < df.row_count:
+            df_chunk = df.__next__()
+#            print(df_chunk.info())
+            # print(f"if_exists: {if_exists}")
+            df_chunk.to_sql(ds_name, db_conn, if_exists=if_exists, index=False)
+            # if it did not fail, it will append the rest. 
+            if_exists = 'append'
+            pbar.update(df_chunk.shape[0])
+            read_so_far += df_chunk.shape[0]
+#            sys.stdout.write('\r')
+#            sys.stdout.write(f"\t Read {read_so_far/df.row_count*100:.2f}% records to sql table {ds_name}")
 
 
 class heor_study():
