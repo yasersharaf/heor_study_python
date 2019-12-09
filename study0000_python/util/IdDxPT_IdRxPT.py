@@ -9,6 +9,10 @@ import datetime
 import sqlite3
 import traceback
 import sys
+import platform
+
+
+
 
 def low_case_str_list(l):
     assert  isinstance(l, list)
@@ -16,8 +20,9 @@ def low_case_str_list(l):
 
 def str_to_list(str_or_list=[]):
     if isinstance(str_or_list, str):
-        str_or_list.replace(",", " ")
-        str_or_list = str_or_list.strip()
+        str_or_list = str_or_list.replace(",", " ")
+        str_or_list = str_or_list.split()
+    return str_or_list
 
 def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
     try:
@@ -59,12 +64,14 @@ def sql_list_table_columns(db_conn=None, db_tb_name=None):
 
 def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
     # TODO: , stDt=None, edDt=None
-
-    dbList = str_to_list(dbList)
+    print(10*"\n")
+    dbList_as_list = str_to_list(dbList)
+    print("\n\n\n\ndbList: ",dbList_as_list,"\n\n\n\n")
     scope = str_to_list(scope)
     
     df_tables = pd.read_sql_query(f"SELECT * FROM {dbLib}.sqlite_master WHERE type='table';", db_conn)
-    table_list = [ds for ds in df_tables['name'].tolist() if (ds[0:4] in dbList and ds[4] in scope)]
+    all_tables = df_tables[['name']].applymap(lambda x: x.replace('\\','.').split('.')[-1])['name'].tolist()
+    table_list = [ds for ds in all_tables if (ds[0:4] in dbList_as_list and ds[4] in scope)]
     return table_list
 
 #IdDxPT record extraction *******************'''
@@ -89,7 +96,7 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
                     'on_clause': ''}
         all_columns = get_union_columns(db_conn=db_conn, dbLib=dbLib, table_list=table_list)
         if codes or dxVar:
-            if not (codes and dxVar)
+            if not (codes and dxVar):
                 raise ValueError('Either both dxVar and codes must be provided or none.')
             codes = str_to_list(codes)
             dxVar = str_to_list(dxVar)
@@ -167,7 +174,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
                     'on_clause': ''}
     
         if codes or rxVar:
-            if not (codes and rxVar)
+            if not (codes and rxVar):
                 raise ValueError('Either both rxVar and codes must be provided or none.')
             codes = str_to_list(codes)
             dxVar = str_to_list(dxVar)

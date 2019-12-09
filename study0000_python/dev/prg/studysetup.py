@@ -15,16 +15,13 @@ util_dir = os.path.join(proj_dir,'util')
 sys.path.append(util_dir)
 print(f"The study directory is {proj_dir}")
 
-from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPt
 
-
-
-chunksize = 1*10**2
-def sas7bdat2sql(sas_file, db_conn=None, chunksize=10**4, if_exists='replace'):
+def sas7bdat2sql(sas_file_path, db_conn=None, chunksize=10**3, if_exists='replace'):
     '''# Should be in try catch block'''
-    df = pd.read_sas(sas_file, encoding='latin-1', chunksize=chunksize)
-    ds_name = sas_file.split('/')[-1].split('.')[0]
-    print(f"\n\nReading {df.row_count} records from {sas_file.split('/')[-1]} table ...")
+    df = pd.read_sas(sas_file_path, encoding='latin-1', chunksize=chunksize)
+    sas_file = os.path.split(sas_file_path)[-1]
+    ds_name = sas_file.split('.')[0]
+    print(f"\n\nReading {df.row_count} records from {sas_file} table ...")
     read_so_far = 0
     for df_chunk in df:
         # print(df.info())
@@ -86,12 +83,12 @@ class heor_study():
                     self.sas_dataset_list.append(os.path.join(self.raw_sas_dir, file))
                     with sqlite3.connect(self.raw_db) as c:
                         try:
-                            sas7bdat2sql(self.sas_dataset_list[-1], db_conn=c, chunksize=chunksize, if_exists='fail')
+                            sas7bdat2sql(self.sas_dataset_list[-1], db_conn=c, if_exists='fail')
                         except ValueError as identifier:
                             print("Warning:", identifier)
                             print("Assign True to refresh_raw_sas to overwrite an existing sql raw dataset")
                             if refresh_raw_sas:
-                                sas7bdat2sql(self.sas_dataset_list[-1], db_conn=c, chunksize=chunksize, if_exists='replace')
+                                sas7bdat2sql(self.sas_dataset_list[-1], db_conn=c, if_exists='replace')
                             # c.commit()
                             # curr = c.cursor()
                             # curr.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -229,83 +226,7 @@ class heor_study():
 
 # table_dtype = {'D':dtype_D, 'O':dtype_O, 'S':dtype_S, 'T':dtype_T}
 
-if __name__ == "__main__":
-    pass
-    import os
-    # from studysetup import  heor_study
-    s = heor_study(proj_dir=proj_dir)
-    c = s.db.cursor()
-    
-#     try:
-#         scd = sqlite3.connect(s.scd_db)
-#         cscds = scd.cursor()    
-#         cscds.execute("""CREATE TABLE mytable
-#                  (start, end, score)""")
 
-#         scd.commit()
-#         scd.close()
-#     except Exception as ex:
-#         pass
-#         print('passing')
-#         scd = sqlite3.connect(s.scd_db)
-#         cscds = scd.cursor()    
-#         cscds.execute("SELECT name FROM sqlite_master WHERE type='table';")
-#         print(cscds.fetchall())
-        
-#         cscds.execute("""INSERT INTO mytable (start, end, score)
-#               values(1, 99, 123);""")
-#         cscds.execute("SELECT * FROM mytable;")
-#         print(cscds.fetchall())
-#         scd.commit()
-        
-#         scd.commit()
-#         scd.close()
-#         print(ex)
-    
-
-
-#     c.execute("SELECT * FROM scd.mytable")
-#     print(c.fetchall())
-#     s.db.commit()
-#     c.fetchall()
-    execute_n_drop(conn_or_cur=c, sql_expr="""CREATE TABLE scd.mytable
-                 (start, end, new_score_5)""")
-    s.db.commit()
-
-    from _01_import_codes import import_codes
-    import_codes(study=s)
-    s.db.commit()
-    
-    c.execute("SELECT * FROM scd.sqlite_master;")
-    print("\n\n scd_fetchal:\n",c.fetchall())
-
-    df = pd.read_sql_query("SELECT * FROM scd.sqlite_master;", s.db)
-
-    from IPython.display import display, HTML
-    display(HTML(df.to_html()))
-    print(df)
-
-    # 02_filter->idDxPt
-    codes = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
-    dxVar = 'pdx dx1 dx2'
-    total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s,o",
-                        codes=codes, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end)
-    
-    from timeit import default_timer as timer
-    execution_time = timer()
-
-    execute_n_drop(conn_or_cur=c, 
-                   sql_expr='''create table dummy11 as select a.* from outDsn as a
-                                inner join scd.icd9 as b
-                                on instr(a.dx1,b.icd9) > 0
-                                ''', if_exists='replace')
-    # compare it with on a.DX1 like '%' || b.icd9 || '%'
-    print(pd.read_sql_query('select count(*) from dummy11',s.db))
-
-    
-    #s.db.commit()
-    execution_time = timer() - execution_time
-    print(execution_time)
 
 
     
