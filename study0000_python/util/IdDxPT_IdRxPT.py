@@ -146,7 +146,7 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
 
 
 # #IdRxPT record extraction *******************'''
-def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt=None, edDt=None,\
+def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=None, edDt=None,\
            rxVar = None, codes=None,  outDsn='outDsn'):
 
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
@@ -178,10 +178,46 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
                 raise ValueError('Either both rxVar and codes must be provided or none.')
             codes = str_to_list(codes)
             dxVar = str_to_list(dxVar)
-            df_code = pd.DataFrame(codes, columns = ['dx'])
-            df_code_ds = 'dx_list'
+            df_code = pd.DataFrame(codes, columns = ['rx'])
+            df_code_ds = 'rx_list'
             df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
 
+        for table_name, table_num in zip(table_list, range(len(table_list))):
+            if codes:
+                table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
+                sql_args['column_prefix'] = 'a' + str(table_num) + '.'
+                sql_args['table_alias'] = 'AS ' + sql_args['column_prefix'][0:-1]
+                sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.rx) > 0" \
+                                                             for join_col in [col.lower() for col in rxVar if col.lower() in [col2.lower() for col2 in table_col]]])
+                sql_args['join clause'] = f'INNER JOIN {df_code_ds} AS b{table_num}' 
+            sql_select_list.append(\
+                f'''SELECT {', '.join([sql_args['column_prefix'] + col if col in [col2.lower() for col2 in table_col] 
+                                                                       else '   NULL AS ' + col  for col in all_columns])},
+'{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name} {sql_args['table_alias']}
+                {sql_args['join clause']}
+                {sql_args['on_clause']}                                                       
+                WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
+            ''')
+
+
+        sql_id_rx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
+        print(sql_id_rx)
+
+        from timeit import default_timer as timer
+        execution_time = timer()
+        # db_conn.execute(sql_id_dx)
+
+        execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_id_dx , if_exists='replace')
+        total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
+
+        execution_time = timer() - execution_time
+        assert isinstance(total_rows, pd.DataFrame)
+
+        print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
+                    in {execution_time:.3g} seconds''' )
+        
+
+        return total_rows    
 
 
 '''    PROC SQL NOPRINT;
