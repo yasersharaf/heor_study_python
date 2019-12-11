@@ -9,7 +9,7 @@
 # *********************************************************************************'''
 
 study_ndc = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
-study_hcpcs = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
+study_hcpcs = pd.read_sql_query("SELECT icd9 FROM scd.hcpcs", s.db).iloc[:,0].tolist()
 
 print("study hcpcs: ", *study_hcpcs)
 print("study ndc: "  , *study_ndc)

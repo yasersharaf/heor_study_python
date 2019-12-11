@@ -161,6 +161,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
     
     sql_select_list = []
     all_columns = []
+    table_col = []
     #Append the datasets*/
     if len(table_list) > 0:
 
@@ -177,7 +178,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
             if not (codes and rxVar):
                 raise ValueError('Either both rxVar and codes must be provided or none.')
             codes = str_to_list(codes)
-            dxVar = str_to_list(dxVar)
+            rxVar = str_to_list(rxVar)
             df_code = pd.DataFrame(codes, columns = ['rx'])
             df_code_ds = 'rx_list'
             df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
@@ -187,8 +188,9 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
                 table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
                 sql_args['column_prefix'] = 'a' + str(table_num) + '.'
                 sql_args['table_alias'] = 'AS ' + sql_args['column_prefix'][0:-1]
-                sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.rx) > 0" \
-                                                             for join_col in [col.lower() for col in rxVar if col.lower() in [col2.lower() for col2 in table_col]]])
+                on_conditions = [f"{sql_args['column_prefix']}{join_col}=b{table_num}.rx" \
+                                                             for join_col in [col.lower() for col in rxVar if col.lower() in [col2.lower() for col2 in table_col]]]
+                sql_args['on_clause'] = 'ON ' + ' OR '.join(on_conditions)
                 sql_args['join clause'] = f'INNER JOIN {df_code_ds} AS b{table_num}' 
             sql_select_list.append(\
                 f'''SELECT {', '.join([sql_args['column_prefix'] + col if col in [col2.lower() for col2 in table_col] 
@@ -205,9 +207,9 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
 
         from timeit import default_timer as timer
         execution_time = timer()
-        # db_conn.execute(sql_id_dx)
+        # db_conn.execute(sql_id_rx)
 
-        execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_id_dx , if_exists='replace')
+        execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_id_rx , if_exists='replace')
         total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
 
         execution_time = timer() - execution_time
@@ -247,7 +249,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
     %if &code ne %then %do;
     if upcase(SCOPE) in ("O","S") then do;
         if proc1 in (&&&code) then output;
-    end; 
+    end; sql_id_dx
     if upcase(SCOPE) in ("D") then do;
         if ndcnum in (&&&code) then output;
     end; 
