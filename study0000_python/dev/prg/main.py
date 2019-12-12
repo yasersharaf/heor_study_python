@@ -52,6 +52,23 @@ if __name__ == "__main__":
     #                     codes=icd9_codes, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end)
     
     
+    procVar = 'proc1'
+    hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", s.db).iloc[:,0].tolist()
+    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
+                        codes=hcpcs_codes, rxVar=procVar, stDt=s.study_start, edDt=s.study_end,
+                        outDsn='interestTX_SO')
+    #  739
+    
+    
+    ndcVar = 'ndcnum'
+    ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", s.db).iloc[:,0].tolist()
+    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
+                        codes=ndc_codes, rxVar=ndcVar, stDt=s.study_start, edDt=s.study_end,
+                        outDsn='interestTX_D')
+    #  2784 -> fix sas
+    # TODO: fix sas
+    
+    
 
 
 

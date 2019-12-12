@@ -11,37 +11,56 @@
 study_ndc = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
 study_hcpcs = pd.read_sql_query("SELECT icd9 FROM scd.hcpcs", s.db).iloc[:,0].tolist()
 
-print("study hcpcs: ", *study_hcpcs)
-print("study ndc: "  , *study_ndc)
 
 
 # identify use of biologics of interest with HCPCS
-# %IdRxPT(dbLib = raw,SCOPE = ("S","O"), stDt = &study_start, edDt = &study_end, code = study_hcpcs , outDsn = interestDS_SO);
-dxVar = 'pdx dx1 dx2'
-total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s,o",
-                        codes=study_ndc, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end,
-                        outDsn=interestDS_SO)
+    procVar = 'proc1'
+    hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", s.db).iloc[:,0].tolist()
+
+    print("study hcpcs: ", *hcpcs_codes)
+
+    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
+                        codes=hcpcs_codes, rxVar=procVar, stDt=s.study_start, edDt=s.study_end,
+                        outDsn='interestTX_SO')
+    #  739
     
 
-/*identify use of biologics of interest with NDC*/
-%IdRxPT(dbLib = raw,SCOPE = ("D"), stDt = &study_start, edDt = &study_end, code = study_ndc , outDsn = interestDS_D);
 
-/*clean dayssupp*/
+# identify use of biologics of interest with NDC*/
+    ndcVar = 'ndcnum'
+    ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", s.db).iloc[:,0].tolist()
+    
+    print("study ndc: "  , *ndc_codes)
+
+    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
+                        codes=ndc_codes, rxVar=ndcVar, stDt=s.study_start, edDt=s.study_end,
+                        outDsn='interestTX_D')
+    #  2784 -> fix sas
+    # TODO: fix sas
+
+# TODO: Clean days of supply
+# clean dayssupp
 %clean_daysupp_sas(indsn = interestDS_D, outDsn = interestDS_D, DAYSUPP = DAYSUPP, ndcnum = ndcnum);
 
 
-/*create interestedTx by merging records of HCPCS ans NDC*/
-proc sql;
-create table in_rds.interestedTx as 
-select * from (select a.*, Generic_name from interestDS_D as a
-               join in_scd.Study_code_ndc as b
-               on a.ndcnum = b.ndc)
-outer union corr
-select * from (select a.*, b.daysupp, Generic_name from interestDS_SO as a
-               join in_scd.Study_code_hcpcs as b
-               on a.proc1 = b.hcpcs);
-;
-quit;
+    # create interestTx by merging records of HCPCS ans NDC
+    sql_statement = \
+'''CREATE TABLE rds.interestTx AS 
+SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp 
+FROM (SELECT a.*, Generic_name from interestTX_D AS a
+               JOIN scd.ndc as b
+               ON a.ndcnum = b.ndc)
+UNION
+SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp
+FROM (SELECT a.*, b.daysupp, Generic_name from interestTX_SO AS a
+               JOIN scd.hcpcs as b
+               ON a.proc1 = b.hcpcs);'''
+
+    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statement, if_exists='replace')
+    # 3473 
+
+
+
 
 /*create patient table, patient age, and index date, sex, and the index treatment from interestedTx*/
 PROC SQL;
