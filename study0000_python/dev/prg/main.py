@@ -22,6 +22,53 @@ print(f"The study directory is {proj_dir}")
 from studysetup import heor_study
 from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPT
 
+
+#Supply Days Cleaning using PROC SQL
+def clean_daysupp_sql(inDsn=None, outDsn=None,
+                         supply_days='daysupp', ndcnum='ndcnum',
+                         id_var='enrolid', service_date_var='svcdate'):
+    sql_statment_1a = f'''
+CREATE TABLE '_adjust_daysupp_step1_a' AS 
+SELECT *
+FROM {inDsn}
+ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC;
+'''
+    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1a, if_exists='replace')
+    
+    sql_statment_1b = f'''
+CREATE TABLE _adjust_daysupp_step1_b AS 
+SELECT *, MIN(ROW_NUMBER()) AS N
+FROM _adjust_daysupp_step1_a
+GROUP BY {id_var}, {service_date_var}, {ndcnum}
+# HAVING N = ROW_NUMBER()
+;
+'''
+    print()
+    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1b, if_exists='replace')
+
+    # /*/*SQL shortcut*/;*/
+    # /*PROC SQL;*/
+    # /*CREATE TABLE _ADJUST_DAYSUPP_STEP1_B_SHORTCUT AS */
+    # /*SELECT DISTINCT ENROLID, SVCDATE, &NDCNUM., MAX(&DAYSUPP.) AS &DAYSUPP.*/
+    # /*FROM &INDSN*/
+    # /*GROUP BY ENROLID, SVCDATE, &NDCNUM.*/
+    # /*;*/
+    # /*QUIT;*/
+
+    # ;
+    
+    
+    
+    sql_statment_2a = f'''
+    CREATE TABLE _adjust_daysupp_step2_a AS 
+SELECT {ndcnum}, {supply_days}, COUNT(*) as count
+FROM _adjust_daysupp_step1_b
+WHERE {supply_days}>0
+GROUP BY {ndcnum}, {supply_days}
+ORDER BY {ndcnum}, count DESC;
+'''
+    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1b, if_exists='replace')
+
 if __name__ == "__main__":
     # pass
     # from studysetup import  heor_study
@@ -68,6 +115,10 @@ if __name__ == "__main__":
     #  2784 -> fix sas
     # TODO: fix sas
     
+    
+    clean_daysupp_sql(inDsn='interestTX_D', outDsn='outDsn',
+                         supply_days='daysupp', ndcnum='ndcnum',
+                         id_var='enrolid', service_date_var='svcdate')
     
 
 
