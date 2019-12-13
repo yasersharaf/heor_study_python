@@ -27,71 +27,62 @@ from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPT
 def clean_daysupp_sql(db_conn=None, inDsn=None, outDsn=None,
                          supply_days='daysupp', ndcnum='ndcnum',
                          id_var='enrolid', service_date_var='svcdate'):
-    sql_statment_1_a = f'''--sql
-CREATE TABLE '_adjust_daysupp_step_1_a' AS 
+    sql_statment_1_a = f'''--sql 
+CREATE TABLE _adjust_daysupp_step_1_a AS 
 SELECT *
 FROM {inDsn}
 ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC;
 '''
     execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_1_a, if_exists='replace')
     
-    sql_statment_1_b = f'''
+    sql_statement_1_b = f'''--sql
 CREATE TABLE _adjust_daysupp_step_1_b AS 
 SELECT {id_var}, {service_date_var}, {ndcnum}, {supply_days}, ROW_NUMBER() OVER (
                         PARTITION BY {id_var}, {service_date_var}, {ndcnum}
                         ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC
                         )  AS N
-FROM _adjust_daysupp_step_1_a
-;
+FROM _adjust_daysupp_step_1_a;
 '''
-    print(sql_statment_1_b)
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_1_b, if_exists='replace')
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_1_b, if_exists='replace')
 
-
-    # /*/*SQL shortcut*/;*/
-    # /*PROC SQL;*/
-    # /*CREATE TABLE _ADJUST_DAYSUPP_STEP1_B_SHORTCUT AS */
-    # /*SELECT DISTINCT ENROLID, SVCDATE, &NDCNUM., MAX(&DAYSUPP.) AS &DAYSUPP.*/
-    # /*FROM &INDSN*/
-    # /*GROUP BY ENROLID, SVCDATE, &NDCNUM.*/
-    # /*;*/
-    # /*QUIT;*/
-
-    # ;
     
     
-    
-    sql_statment_2_a = f'''
-    CREATE TABLE _adjust_daysupp_step_2_a AS 
-SELECT {ndcnum}, {supply_days}, COUNT(*) as count
+    sql_statement_2_a = f'''--sql
+CREATE TABLE _adjust_daysupp_step_2_a AS 
+SELECT {ndcnum}, {supply_days}, COUNT(*) as freq
 FROM _adjust_daysupp_step_1_b
 WHERE {supply_days}>0
 GROUP BY {ndcnum}, {supply_days}
-ORDER BY {ndcnum}, count DESC;
+ORDER BY {ndcnum}, freq DESC;
 '''
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_2_a, if_exists='replace')
-    
-    
-    
-    sql_statement_2_b = '''--sql
-    CREATE TABLE _ADJUST_DAYSUPP_STEP2_B AS 
-    SELECT &NDCNUM., &DAYSUPP., MIN(MONOTONIC()) AS FIRST_OBS_ROW
-    FROM _ADJUST_DAYSUPP_STEP2_A
-    GROUP BY &NDCNUM.
-    HAVING  FIRST_OBS_ROW = MONOTONIC()
-    '''
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_2_a, if_exists='replace')
+       
+    sql_statement_2_b = f'''--sql
+CREATE TABLE _adjust_daysupp_step_2_b AS 
+SELECT {ndcnum}, {supply_days} FROM (
+    SELECT {ndcnum}, {supply_days}, freq, ROW_NUMBER() OVER(
+                                PARTITION BY {ndcnum}
+                                ORDER BY {ndcnum}, freq DESC
+                                ) AS N
+    FROM _adjust_daysupp_step_2_a
+    ) AS a
+WHERE N = 1;
+''' 
 
-    PROC SQL;
-    CREATE TABLE &OUTDSN AS 
-    SELECT X.*, CASE
-                    WHEN X.&DAYSUPP._DUMMY LE 0 THEN COALESCE(Y.&DAYSUPP._DUMMY,0)
-                    ELSE X.&DAYSUPP._DUMMY
-                END AS &DAYSUPP
-    FROM _ADJUST_DAYSUPP_STEP1_B(RENAME = (&DAYSUPP = &DAYSUPP._DUMMY)) AS X
-    LEFT JOIN _ADJUST_DAYSUPP_STEP2_B(RENAME = (&DAYSUPP = &DAYSUPP._DUMMY)) AS Y
-    ON Y.&NDCNUM = X.&NDCNUM
-    WHERE CALCULATED &DAYSUPP > 0
-    ;QUIT;
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_2_b, if_exists='replace')
+
+    sql_statement_out = f'''--sql
+CREATE TABLE {outDsn} AS 
+SELECT a.{id_var}, a.{service_date_var}, a.{ndcnum}, 
+                CASE
+                    WHEN a.{supply_days} > 0 THEN a.{supply_days}
+                    ELSE b.{supply_days}
+            END AS {supply_days}
+FROM _adjust_daysupp_step_1_b AS a
+INNER JOIN _adjust_daysupp_step_2_b AS b
+ON a.{ndcnum} = b.{ndcnum};
+'''
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_out, if_exists='replace')
 
 if __name__ == "__main__":
     # pass

@@ -24,15 +24,23 @@ def str_to_list(str_or_list=[]):
         str_or_list = str_or_list.split()
     return str_or_list
 
-def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
+def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace', display=True):
+    if display:
+        print("Executing ",sql_expr)
     try:
         conn_or_cur.execute(sql_expr)
     except sqlite3.OperationalError:
-        traceback.print_exc(file=sys.stderr)
         sql_expr = " ".join(sql_expr.split())
         sql_expr_upper = sql_expr.upper()
-        if "CREATE TABLE IF EXISTS" not in sql_expr_upper:
+        if "CREATE TABLE IF NOT EXISTS" in sql_expr_upper or \
+           "CREATE TABLE" not in sql_expr_upper:
+               raise sqlite3.OperationalError
+        if "CREATE TABLE IF NOT EXISTS" not in sql_expr_upper:
             if "CREATE TABLE" in sql_expr_upper:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback.print_exception(exc_type, exc_value, exc_traceback,
+                              limit=2, file=sys.stdout)
+                # traceback.print_exc(file=sys.stderr)
                 new_table_name_upcase = sql_expr_upper.split("CREATE TABLE")[1].strip().split()[0]
                 tb_name_location = sql_expr_upper.find(new_table_name_upcase)
                 new_table_name = sql_expr[tb_name_location:].split()[0]
@@ -40,9 +48,11 @@ def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace'):
                     print(f"""Note: Consider executing the expression \n "DROP TABLE IF EXISTS {new_table_name};"  """)
                     if if_exists == 'replace':
                         sql_expr_drop = f"DROP TABLE IF EXISTS {new_table_name};"
-                        print(f"Ececuting: \n{sql_expr_drop}\n first.")
+                        print(f"Ececuting \n{sql_expr_drop}\n first since if_exist={if_exists}.")
                         conn_or_cur.execute(sql_expr_drop)
                         conn_or_cur.execute(sql_expr)
+        
+               
 
 def get_union_columns(db_conn=None, dbLib=None, table_list=None):
     all_columns = []
