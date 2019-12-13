@@ -24,27 +24,29 @@ from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPT
 
 
 #Supply Days Cleaning using PROC SQL
-def clean_daysupp_sql(inDsn=None, outDsn=None,
+def clean_daysupp_sql(db_conn=None, inDsn=None, outDsn=None,
                          supply_days='daysupp', ndcnum='ndcnum',
                          id_var='enrolid', service_date_var='svcdate'):
-    sql_statment_1a = f'''
-CREATE TABLE '_adjust_daysupp_step1_a' AS 
+    sql_statment_1_a = f'''--sql
+CREATE TABLE '_adjust_daysupp_step_1_a' AS 
 SELECT *
 FROM {inDsn}
 ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC;
 '''
-    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1a, if_exists='replace')
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_1_a, if_exists='replace')
     
-    sql_statment_1b = f'''
-CREATE TABLE _adjust_daysupp_step1_b AS 
-SELECT *, MIN(ROW_NUMBER()) AS N
-FROM _adjust_daysupp_step1_a
-GROUP BY {id_var}, {service_date_var}, {ndcnum}
-# HAVING N = ROW_NUMBER()
+    sql_statment_1_b = f'''
+CREATE TABLE _adjust_daysupp_step_1_b AS 
+SELECT {id_var}, {service_date_var}, {ndcnum}, {supply_days}, ROW_NUMBER() OVER (
+                        PARTITION BY {id_var}, {service_date_var}, {ndcnum}
+                        ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC
+                        )  AS N
+FROM _adjust_daysupp_step_1_a
 ;
 '''
-    print()
-    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1b, if_exists='replace')
+    print(sql_statment_1_b)
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_1_b, if_exists='replace')
+
 
     # /*/*SQL shortcut*/;*/
     # /*PROC SQL;*/
@@ -59,15 +61,37 @@ GROUP BY {id_var}, {service_date_var}, {ndcnum}
     
     
     
-    sql_statment_2a = f'''
-    CREATE TABLE _adjust_daysupp_step2_a AS 
+    sql_statment_2_a = f'''
+    CREATE TABLE _adjust_daysupp_step_2_a AS 
 SELECT {ndcnum}, {supply_days}, COUNT(*) as count
-FROM _adjust_daysupp_step1_b
+FROM _adjust_daysupp_step_1_b
 WHERE {supply_days}>0
 GROUP BY {ndcnum}, {supply_days}
 ORDER BY {ndcnum}, count DESC;
 '''
-    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statment_1b, if_exists='replace')
+    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_2_a, if_exists='replace')
+    
+    
+    
+    sql_statement_2_b = '''--sql
+    CREATE TABLE _ADJUST_DAYSUPP_STEP2_B AS 
+    SELECT &NDCNUM., &DAYSUPP., MIN(MONOTONIC()) AS FIRST_OBS_ROW
+    FROM _ADJUST_DAYSUPP_STEP2_A
+    GROUP BY &NDCNUM.
+    HAVING  FIRST_OBS_ROW = MONOTONIC()
+    '''
+
+    PROC SQL;
+    CREATE TABLE &OUTDSN AS 
+    SELECT X.*, CASE
+                    WHEN X.&DAYSUPP._DUMMY LE 0 THEN COALESCE(Y.&DAYSUPP._DUMMY,0)
+                    ELSE X.&DAYSUPP._DUMMY
+                END AS &DAYSUPP
+    FROM _ADJUST_DAYSUPP_STEP1_B(RENAME = (&DAYSUPP = &DAYSUPP._DUMMY)) AS X
+    LEFT JOIN _ADJUST_DAYSUPP_STEP2_B(RENAME = (&DAYSUPP = &DAYSUPP._DUMMY)) AS Y
+    ON Y.&NDCNUM = X.&NDCNUM
+    WHERE CALCULATED &DAYSUPP > 0
+    ;QUIT;
 
 if __name__ == "__main__":
     # pass
@@ -116,7 +140,7 @@ if __name__ == "__main__":
     # TODO: fix sas
     
     
-    clean_daysupp_sql(inDsn='interestTX_D', outDsn='outDsn',
+    clean_daysupp_sql(db_conn=s.db, inDsn='interestTX_D', outDsn='outDsn',
                          supply_days='daysupp', ndcnum='ndcnum',
                          id_var='enrolid', service_date_var='svcdate')
     
