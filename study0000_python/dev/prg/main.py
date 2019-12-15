@@ -20,69 +20,24 @@ print(f"The study directory is {proj_dir}")
 
 
 from studysetup import heor_study
-from IdDxPT_IdRxPT import execute_n_drop, IdDxPT, IdRxPT
+from IdDxPT_IdRxPT import execute_n_drop, str_to_list, IdDxPT, IdRxPT
 
 
-#Supply Days Cleaning using PROC SQL
-def clean_daysupp_sql(db_conn=None, inDsn=None, outDsn=None,
-                         supply_days='daysupp', ndcnum='ndcnum',
-                         id_var='enrolid', service_date_var='svcdate'):
-    sql_statment_1_a = f'''--sql 
-CREATE TABLE _adjust_daysupp_step_1_a AS 
-SELECT *
-FROM {inDsn}
-ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC;
-'''
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statment_1_a, if_exists='replace')
-    
-    sql_statement_1_b = f'''--sql
-CREATE TABLE _adjust_daysupp_step_1_b AS 
-SELECT {id_var}, {service_date_var}, {ndcnum}, {supply_days}, ROW_NUMBER() OVER (
-                        PARTITION BY {id_var}, {service_date_var}, {ndcnum}
-                        ORDER BY {id_var}, {service_date_var}, {ndcnum} ASC, {supply_days} DESC
-                        )  AS N
-FROM _adjust_daysupp_step_1_a;
-'''
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_1_b, if_exists='replace')
 
-    
-    
-    sql_statement_2_a = f'''--sql
-CREATE TABLE _adjust_daysupp_step_2_a AS 
-SELECT {ndcnum}, {supply_days}, COUNT(*) as freq
-FROM _adjust_daysupp_step_1_b
-WHERE {supply_days}>0
-GROUP BY {ndcnum}, {supply_days}
-ORDER BY {ndcnum}, freq DESC;
-'''
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_2_a, if_exists='replace')
-       
-    sql_statement_2_b = f'''--sql
-CREATE TABLE _adjust_daysupp_step_2_b AS 
-SELECT {ndcnum}, {supply_days} FROM (
-    SELECT {ndcnum}, {supply_days}, freq, ROW_NUMBER() OVER(
-                                PARTITION BY {ndcnum}
-                                ORDER BY {ndcnum}, freq DESC
-                                ) AS N
-    FROM _adjust_daysupp_step_2_a
-    ) AS a
-WHERE N = 1;
-''' 
 
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_2_b, if_exists='replace')
+#     sql_statement = '''--sql
+# CREATE TABLE rds.interest_tx AS 
+# SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp 
+# FROM (SELECT a.*, Generic_name from interest_tx_d_cleaned AS a
+#                JOIN scd.ndc as b
+#                ON a.ndcnum = b.ndc)
+# UNION
+# SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp
+# FROM (SELECT a.*, b.daysupp, Generic_name from interest_tx_so AS a
+#                JOIN scd.hcpcs as b
+#                ON a.proc1 = b.hcpcs);'''
 
-    sql_statement_out = f'''--sql
-CREATE TABLE {outDsn} AS 
-SELECT a.{id_var}, a.{service_date_var}, a.{ndcnum}, 
-                CASE
-                    WHEN a.{supply_days} > 0 THEN a.{supply_days}
-                    ELSE b.{supply_days}
-            END AS {supply_days}
-FROM _adjust_daysupp_step_1_b AS a
-INNER JOIN _adjust_daysupp_step_2_b AS b
-ON a.{ndcnum} = b.{ndcnum};
-'''
-    execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_statement_out, if_exists='replace')
+#     execute_n_drop(db_conn=s.db, sql_expr=sql_statement, if_exists='replace')
 
 if __name__ == "__main__":
     # pass
@@ -90,23 +45,36 @@ if __name__ == "__main__":
     s = heor_study(proj_dir=proj_dir, import_raw_sas=False)
     c = s.db.cursor()
     
-    execute_n_drop(conn_or_cur=c, sql_expr="""CREATE TABLE scd.mytable
+    execute_n_drop(db_conn=s.db, sql_expr="""CREATE TABLE scd.mytable
                  (start, end, new_score_5)""")
     s.db.commit()
     
     from _01_import_codes import import_codes
     import_codes(study=s)
-    s.db.commit()
     
-    c.execute("SELECT * FROM scd.sqlite_master;")
-    print("\n\n scd_fetchal:\n",c.fetchall())
     
-    df = pd.read_sql_query("SELECT * FROM scd.sqlite_master;", s.db)
+    supply_days_var='daysupp'
+    ndc_var='ndcnum'
+    id_var='enrolid'
+    service_date_var='svcdate'
+    demoraphic_vars = 'Sex, DOBYR, AGE, planTyp, Region'
     
-    from IPython.display import display, HTML
-    display(HTML(df.to_html()))
-    print(df)
+    from _02_filter_patients import filter_patients
+    filter_patients(study=s,
+                    supply_days_var='daysupp',
+                    ndc_var='ndcnum',
+                    proc_var='proc1',
+                    id_var='enrolid',
+                    service_date_var='svcdate',
+                    demoraphic_vars = 'Sex, DOBYR, AGE, planTyp, Region',
+                    )
+    # s.db.commit()
     
+    # c.execute("SELECT * FROM scd.sqlite_master;")
+    # print("\n\n scd_fetchal:\n",c.fetchall())
+    
+    # df = pd.read_sql_query("SELECT * FROM scd.sqlite_master;", s.db)
+        
     ##### 02_filter->idDxPt
     # icd9_codes = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
     # dxVar = 'pdx dx1 dx2'
@@ -114,27 +82,58 @@ if __name__ == "__main__":
     #                     codes=icd9_codes, dxVar=dxVar, stDt=s.study_start, edDt=s.study_end)
     
     
-    procVar = 'proc1'
-    hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", s.db).iloc[:,0].tolist()
-    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
-                        codes=hcpcs_codes, rxVar=procVar, stDt=s.study_start, edDt=s.study_end,
-                        outDsn='interestTX_SO')
-    #  739
+#     proc_var = 'proc1'
+#     hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", s.db).iloc[:,0].tolist()
+#     total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
+#                         codes=hcpcs_codes, rxVar=proc_var, stDt=s.study_start, edDt=s.study_end,
+#                         outDsn='interest_tx_so')
+#     #  739
     
     
-    ndcVar = 'ndcnum'
-    ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", s.db).iloc[:,0].tolist()
-    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
-                        codes=ndc_codes, rxVar=ndcVar, stDt=s.study_start, edDt=s.study_end,
-                        outDsn='interestTX_D')
-    #  2784 -> fix sas
-    # TODO: fix sas
+#     ndc_var = 'ndcnum'
+#     ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", s.db).iloc[:,0].tolist()
+#     total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
+#                         codes=ndc_codes, rxVar=ndc_var, stDt=s.study_start, edDt=s.study_end,
+#                         outDsn='interest_tx_d')
+#     #  2784 -> fix sas
+#     # TODO: fix sas
     
     
-    clean_daysupp_sql(db_conn=s.db, inDsn='interestTX_D', outDsn='outDsn',
-                         supply_days='daysupp', ndcnum='ndcnum',
-                         id_var='enrolid', service_date_var='svcdate')
-    
+# sql_interest_tx = f'''
+# --sql
+
+# CREATE TABLE rds.interest_tx AS 
+# SELECT a.{id_var}, {service_date_var}, {', '.join(str_to_list(demoraphic_vars))}, Generic_name, {service_date_var} 
+# FROM interest_tx_d_cleaned AS a
+# JOIN scd.ndc as b
+# ON a.{ndc_var} = b.ndc
+
+# UNION ALL
+
+# SELECT a.{id_var}, {service_date_var}, {', '.join(str_to_list(demoraphic_vars))}, Generic_name, {service_date_var} 
+# FROM interest_tx_so AS a
+# JOIN scd.hcpcs as b
+# ON a.{proc_var} = b.hcpcs;'''
+
+# execute_n_drop(db_conn=s.db, sql_expr=sql_interest_tx, if_exists='replace')
+
+
+# # create patient table, patient age, and index date, sex, and the index treatment from interest_tx*/
+# sql_index_patient = f'''--sql
+# create table rds.allpt as 
+# select distinct a.*, DOBYR, AGE
+#         , Sex
+#         , planTyp
+#         , region
+#         , Generic_name as idxTreatment FROM (
+#                SELECT {id_var}, MIN({service_date_var}) AS idxDate from rds.interest_tx
+#                WHERE {service_date_var} BETWEEN '{s.index_start}' AND '{s.index_end}'
+#                GROUP BY {id_var}) AS a
+# join rds.interest_tx as b
+# on b.enrolid = a.enrolid and a.idxDate = b.svcdate;
+# '''
+# execute_n_drop(db_conn=s.db, sql_expr=sql_index_patient, if_exists='replace')
 
 
 
+# s.dbs

@@ -1,0 +1,14 @@
+The study directory is /home/yaser/workspace/heor_rwe_phase_4/heor_study_python/study0000_python
+
+Importing the following sas files to the sql database.
+<class 'sqlite3.Connection'>
+Executing  CREATE TABLE scd.mytable
+                 (start, end, new_score_5)
+[1m[4mWarning: Handling an exception of <class 'sqlite3.OperationalError'>
+ because table mytable already exists
+[0mNote: Consider executing the expression 
+ "DROP TABLE IF EXISTS scd.mytable;"  
+Ececuting 
+DROP TABLE IF EXISTS scd.mytable;
+ first since if_exist=replace.
+          ======================Table scd.mytable now containts 0 observations======================          

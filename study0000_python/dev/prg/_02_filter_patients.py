@@ -8,72 +8,84 @@
 # MODIFICATION:       Use the existing table extraction macros with suggested macro statements
 # *********************************************************************************'''
 
-study_ndc = pd.read_sql_query("SELECT icd9 FROM scd.icd9", s.db).iloc[:,0].tolist()
-study_hcpcs = pd.read_sql_query("SELECT icd9 FROM scd.hcpcs", s.db).iloc[:,0].tolist()
+import pandas as pd
+import sqlite3
+from studysetup import heor_study
+from IdDxPT_IdRxPT import execute_n_drop, str_to_list, IdDxPT, IdRxPT, clean_supply_days
 
 
 
-# identify use of biologics of interest with HCPCS
-    procVar = 'proc1'
-    hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", s.db).iloc[:,0].tolist()
+def filter_patients(study=None,
+                    supply_days_var='daysupp',
+                    ndc_var='ndcnum',
+                    proc_var='proc1',
+                    id_var='enrolid',
+                    service_date_var='svcdate',
+                    demoraphic_vars = '',
+                    ):
+    assert isinstance(study, heor_study) 
 
-    print("study hcpcs: ", *hcpcs_codes)
-
-    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
-                        codes=hcpcs_codes, rxVar=procVar, stDt=s.study_start, edDt=s.study_end,
-                        outDsn='interestTX_SO')
+    # identify use of use of drugs of interest with HCPCS
+    hcpcs_codes = pd.read_sql_query("SELECT hcpcs FROM scd.hcpcs", study.db).iloc[:,0].tolist()
+    total_rows = IdRxPT(db_conn=study.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "s, o",
+                        codes=hcpcs_codes, rxVar=proc_var, 
+                        service_date_var='svcdate', stDt=study.study_start, edDt=study.study_end,
+                        outDsn='interest_tx_so')
     #  739
     
-
-
-# identify use of biologics of interest with NDC*/
-    ndcVar = 'ndcnum'
-    ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", s.db).iloc[:,0].tolist()
-    
-    print("study ndc: "  , *ndc_codes)
-
-    total_rows = IdRxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
-                        codes=ndc_codes, rxVar=ndcVar, stDt=s.study_start, edDt=s.study_end,
-                        outDsn='interestTX_D')
-    #  2784 -> fix sas
+# identify use of use of drugs of interest with NDC codes    
+    ndc_codes = pd.read_sql_query("SELECT ndc FROM scd.ndc", study.db).iloc[:,0].tolist()
+    total_rows = IdRxPT(db_conn=study.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "d",
+                        codes=ndc_codes, rxVar=ndc_var, 
+                        service_date_var='svcdate', stDt=study.study_start, edDt=study.study_end,
+                        outDsn='interest_tx_d')
+    # 2784 -> fix sas
     # TODO: fix sas
-
-# TODO: Clean days of supply
-# clean dayssupp
-%clean_daysupp_sas(indsn = interestDS_D, outDsn = interestDS_D, DAYSUPP = DAYSUPP, ndcnum = ndcnum);
+    
+    # clean supply dates     
+    clean_supply_days(db_conn=study.db, inDsn='interest_tx_d', outDsn='interest_tx_d_cleaned',
+                         supply_days_var=supply_days_var, ndc_var=ndc_var,
+                         id_var=id_var, service_date_var=service_date_var,
+                         demoraphic_vars=demoraphic_vars)
 
 
     # create interestTx by merging records of HCPCS ans NDC
-    sql_statement = \
-'''CREATE TABLE rds.interestTx AS 
-SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp 
-FROM (SELECT a.*, Generic_name from interestTX_D AS a
-               JOIN scd.ndc as b
-               ON a.ndcnum = b.ndc)
-UNION
-SELECT enrolid, svcdate, Sex, DOBYR, AGE, planTyp, Region, Generic_name, daySupp
-FROM (SELECT a.*, b.daysupp, Generic_name from interestTX_SO AS a
-               JOIN scd.hcpcs as b
-               ON a.proc1 = b.hcpcs);'''
 
-    execute_n_drop(conn_or_cur=s.db, sql_expr=sql_statement, if_exists='replace')
+
+    sql_interest_tx = f'''
+--sql
+
+CREATE TABLE rds.interest_tx AS 
+SELECT a.{id_var}, {service_date_var}, {', '.join(str_to_list(demoraphic_vars))}, Generic_name, {service_date_var} 
+FROM interest_tx_d_cleaned AS a
+JOIN scd.ndc as b
+ON a.{ndc_var} = b.ndc
+
+UNION ALL
+
+SELECT a.{id_var}, {service_date_var}, {', '.join(str_to_list(demoraphic_vars))}, Generic_name, {service_date_var} 
+FROM interest_tx_so AS a
+JOIN scd.hcpcs as b
+ON a.{proc_var} = b.hcpcs;'''
+
+    execute_n_drop(db_conn=study.db, sql_expr=sql_interest_tx, if_exists='replace')
     # 3473 
 
 
 
 
-/*create patient table, patient age, and index date, sex, and the index treatment from interestedTx*/
-PROC SQL;
-create table in_rds.allpt as 
+    # create patient table, patient age, and index date, sex, and the index treatment from interest_tx*/
+    sql_index_patient = f'''--sql
+create table rds.allpt as 
 select distinct a.*, DOBYR, AGE
-        , put(Sex,$sex.) as Sex label = "Gender of Patient"
-        , put(planTyp,plantyp.) as planTyp label = "Plan Indicator"
-        , put(region, $region.) as Region label = "Region"
-        , Generic_name as idxTreatment from (select enrolid, min(svcdate) as idxDate format = mmddyy10. from in_rds.interestedTx
-               where &index_start <= svcdate <= &index_end
-               group by enrolid) as a
-join in_rds.interestedTx as b
-on b.enrolid = a.enrolid and a.idxDate = b.svcdate
-;
-Quit;
-
+        , Sex
+        , planTyp
+        , region
+        , Generic_name as idxTreatment FROM (
+               SELECT {id_var}, MIN({service_date_var}) AS idxDate from rds.interest_tx
+               WHERE {service_date_var} BETWEEN '{study.index_start}' AND '{study.index_end}'
+               GROUP BY {id_var}) AS a
+join rds.interest_tx as b
+on b.enrolid = a.enrolid and a.idxDate = b.svcdate;
+'''
+    execute_n_drop(db_conn=study.db, sql_expr=sql_index_patient, if_exists='replace')

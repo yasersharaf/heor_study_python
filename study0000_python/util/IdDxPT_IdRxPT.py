@@ -12,7 +12,92 @@ import sys
 import platform
 
 
+class Formatting:
+    PURPLE = '\033[95m'
+    CYAN = '\033[96m'
+    DARKCYAN = '\033[36m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+def fprint(*args, text_format = Formatting.BOLD+Formatting.UNDERLINE):
+    print(text_format, end='')
+    print(*args)
+    print(Formatting.END, end='')
+    
 
+# Supply Days Cleaning using PROC SQL
+def clean_supply_days(db_conn=None, inDsn=None, outDsn=None,
+                         supply_days_var='daysupp', ndc_var='ndcnum',
+                         id_var='enrolid', service_date_var='svcdate',
+                         demoraphic_vars=''):
+    demoraphic_vars = str_to_list(demoraphic_vars)
+#     sql_statment_1_a = f'''--sql 
+# CREATE TABLE _adjust_daysupp_step_1_a AS 
+# SELECT *
+# FROM {inDsn}
+# ORDER BY {id_var}, {service_date_var}, {ndc_var} ASC, {supply_days_var} DESC;
+# '''
+#     execute_n_drop(db_conn=db_conn, sql_expr=sql_statment_1_a, if_exists='replace')
+    
+    sql_statement_1_b = f'''--sql
+CREATE TABLE _adjust_daysupp_step_1_b AS 
+SELECT * FROM (
+    SELECT {id_var}, {service_date_var}, {ndc_var}, {supply_days_var}, 
+            {', '.join(demoraphic_vars)},
+            ROW_NUMBER() OVER (
+                            PARTITION BY {id_var}, {service_date_var}, {ndc_var}
+                            ORDER BY {id_var}, {service_date_var}, {ndc_var} ASC, {supply_days_var} DESC
+                            )  AS N
+    FROM {inDsn}
+    )
+WHERE N=1;
+'''
+    execute_n_drop(db_conn=db_conn, sql_expr=sql_statement_1_b, if_exists='replace')
+
+    
+    
+    sql_statement_2_a = f'''--sql
+CREATE TABLE _adjust_daysupp_step_2_a AS 
+SELECT {ndc_var}, {supply_days_var}, COUNT(*) as freq
+FROM _adjust_daysupp_step_1_b
+WHERE {supply_days_var}>0
+GROUP BY {ndc_var}, {supply_days_var}
+ORDER BY {ndc_var}, freq DESC;
+'''
+    execute_n_drop(db_conn=db_conn, sql_expr=sql_statement_2_a, if_exists='replace')
+       
+    sql_statement_2_b = f'''--sql
+CREATE TABLE _adjust_daysupp_step_2_b AS 
+SELECT {ndc_var}, {supply_days_var} FROM (
+    SELECT {ndc_var}, {supply_days_var}, freq, ROW_NUMBER() OVER(
+                                PARTITION BY {ndc_var}
+                                ORDER BY {ndc_var}, freq DESC
+                                ) AS N
+    FROM _adjust_daysupp_step_2_a
+    ) AS a
+WHERE N = 1;
+''' 
+
+    execute_n_drop(db_conn=db_conn, sql_expr=sql_statement_2_b, if_exists='replace')
+
+    sql_statement_out = f'''--sql
+CREATE TABLE {outDsn} AS 
+SELECT a.{id_var}, a.{service_date_var}, a.{ndc_var}, 
+                CASE
+                    WHEN a.{supply_days_var} > 0 THEN a.{supply_days_var}
+                    ELSE b.{supply_days_var}
+            END AS {supply_days_var},
+       {', '.join(demoraphic_vars)}            
+        
+FROM _adjust_daysupp_step_1_b AS a
+INNER JOIN _adjust_daysupp_step_2_b AS b
+ON a.{ndc_var} = b.{ndc_var};
+'''
+    execute_n_drop(db_conn=db_conn, sql_expr=sql_statement_out, if_exists='replace')
 
 def low_case_str_list(l):
     assert  isinstance(l, list)
@@ -24,33 +109,45 @@ def str_to_list(str_or_list=[]):
         str_or_list = str_or_list.split()
     return str_or_list
 
-def execute_n_drop(conn_or_cur=None, sql_expr="", if_exists='replace', display=True):
+def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True):
     if display:
         print("Executing ",sql_expr)
+    sql_expr_lines = [line for line in sql_expr.split("\n") if line.strip()[0:2] != '--']
+    sql_expr = "\n".join(sql_expr_lines)
+    sql_expr = " ".join(sql_expr.split())
+    sql_expr_upper = sql_expr.upper()
     try:
-        conn_or_cur.execute(sql_expr)
+        db_conn.execute(sql_expr)
     except sqlite3.OperationalError:
-        sql_expr = " ".join(sql_expr.split())
-        sql_expr_upper = sql_expr.upper()
-        if "CREATE TABLE IF NOT EXISTS" in sql_expr_upper or \
-           "CREATE TABLE" not in sql_expr_upper:
-               raise sqlite3.OperationalError
+        # removing the comments
         if "CREATE TABLE IF NOT EXISTS" not in sql_expr_upper:
             if "CREATE TABLE" in sql_expr_upper:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
-                traceback.print_exception(exc_type, exc_value, exc_traceback,
-                              limit=2, file=sys.stdout)
+                # traceback.print_exception(exc_type, exc_value, exc_traceback,
+                #               limit=1, file=sys.stdout)
                 # traceback.print_exc(file=sys.stderr)
-                new_table_name_upcase = sql_expr_upper.split("CREATE TABLE")[1].strip().split()[0]
-                tb_name_location = sql_expr_upper.find(new_table_name_upcase)
-                new_table_name = sql_expr[tb_name_location:].split()[0]
-                if f"DROP TABLE IF EXISTS {new_table_name_upcase}" not in sql_expr_upper:
-                    print(f"""Note: Consider executing the expression \n "DROP TABLE IF EXISTS {new_table_name};"  """)
-                    if if_exists == 'replace':
-                        sql_expr_drop = f"DROP TABLE IF EXISTS {new_table_name};"
-                        print(f"Ececuting \n{sql_expr_drop}\n first since if_exist={if_exists}.")
-                        conn_or_cur.execute(sql_expr_drop)
-                        conn_or_cur.execute(sql_expr)
+                fprint(f'''Warning: Handling an exception of {str(exc_type)}\n because {str(exc_value)}''')
+                if "already exists" in  str(exc_value):
+                    new_table_name_upcase = sql_expr_upper.split("CREATE TABLE")[1].strip().split()[0]
+                    tb_name_location = sql_expr_upper.find(new_table_name_upcase)
+                    new_table_name = sql_expr[tb_name_location:].split()[0]
+                    if f"DROP TABLE IF EXISTS {new_table_name_upcase}" not in sql_expr_upper:
+                        print(f"""Note: Consider executing the expression \n "DROP TABLE IF EXISTS {new_table_name};"  """)
+                        if if_exists == 'replace':
+                            sql_expr_drop = f"DROP TABLE IF EXISTS {new_table_name};"
+                            print(f"Ececuting \n{sql_expr_drop}\n first since if_exist={if_exists}.")
+                            db_conn.execute(sql_expr_drop)
+                            db_conn.execute(sql_expr)
+                else:
+                    traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stdout)
+                    raise sqlite3.OperationalError
+    if "CREATE TABLE" in sql_expr_upper:
+        new_table_name_upcase = sql_expr_upper.split("CREATE TABLE")[1].strip().split()[0]
+        tb_name_location = sql_expr_upper.find(new_table_name_upcase)
+        new_table_name = sql_expr[tb_name_location:].split()[0]
+        num_rows = pd.read_sql_query(f'SELECT count(*) FROM {new_table_name}',db_conn).iloc[0,0]
+        print(f'Table {new_table_name} now containts {num_rows} observations'.center(90,'=').center(110) )
+            
         
                
 
@@ -73,10 +170,11 @@ def sql_list_table_columns(db_conn=None, db_tb_name=None):
 
 
 def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
+
     # TODO: , stDt=None, edDt=None
-    print(10*"\n")
+
     dbList_as_list = str_to_list(dbList)
-    print("\n\n\n\ndbList: ",dbList_as_list,"\n\n\n\n")
+    print("Lokking into following dbLists: ",dbList_as_list)
     scope = str_to_list(scope)
     
     df_tables = pd.read_sql_query(f"SELECT * FROM {dbLib}.sqlite_master WHERE type='table';", db_conn)
@@ -85,7 +183,8 @@ def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
     return table_list
 
 #IdDxPT record extraction *******************'''
-def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt=None, edDt=None,\
+def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
+           service_date_var='svcdate', stDt=None, edDt=None,
            dxVar = None, codes=None,  outDsn='outDsn'):
 
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
@@ -94,7 +193,7 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
 
     print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
     if stDt is None:
-        stDt = pd.Timestamp(year=1970,month=1,day=1)
+        stDt = pd.Timestamp(year=1900,month=1,day=1)
     if edDt is None:
         edDt = pd.Timestamp(year=2070,month=1,day=1)
     
@@ -128,22 +227,17 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
 '{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name} {sql_args['table_alias']}
                 {sql_args['join clause']}
                 {sql_args['on_clause']}                                                       
-                WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
+                WHERE {service_date_var} >= '{stDt}'  AND {service_date_var} <= '{edDt}'
             ''')
 
 
         sql_id_dx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
-        print(sql_id_dx)
+        # print(sql_id_dx)
 
-        from timeit import default_timer as timer
-        execution_time = timer()
-        # db_conn.execute(sql_id_dx)
-
-        execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_id_dx , if_exists='replace')
+        execute_n_drop(db_conn=db_conn, sql_expr=sql_id_dx , if_exists='replace')
         total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
 
-        execution_time = timer() - execution_time
-        assert isinstance(total_rows, pd.DataFrame)
+
 
         print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
                     in {execution_time:.3g} seconds''' )
@@ -156,7 +250,8 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o", stDt
 
 
 # #IdRxPT record extraction *******************'''
-def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=None, edDt=None,\
+def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
+           service_date_var='svcdate', stDt=None, edDt=None,
            rxVar = None, codes=None,  outDsn='outDsn'):
 
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
@@ -219,7 +314,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d", stDt=N
         execution_time = timer()
         # db_conn.execute(sql_id_rx)
 
-        execute_n_drop(conn_or_cur=db_conn, sql_expr=sql_id_rx , if_exists='replace')
+        execute_n_drop(db_conn=db_conn, sql_expr=sql_id_rx , if_exists='replace')
         total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
 
         execution_time = timer() - execution_time

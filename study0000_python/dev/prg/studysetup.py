@@ -9,11 +9,11 @@ import pandas as pd
 import sys
 import os
 
-file_dir = os.path.dirname(os.path.abspath(__file__))
-proj_dir = os.path.realpath(file_dir+"/../../")
-util_dir = os.path.join(proj_dir,'util')
-sys.path.append(util_dir)
-print(f"The study directory is {proj_dir}")
+# file_dir = os.path.dirname(os.path.abspath(__file__))
+# proj_dir = os.path.realpath(file_dir+"/../../")
+# util_dir = os.path.join(proj_dir,'util')
+# sys.path.append(util_dir)
+# print(f"The study directory is {proj_dir}")
 
 
 def sas7bdat2sql(sas_file_path, db_conn=None, chunksize=10**3, if_exists='replace'):
