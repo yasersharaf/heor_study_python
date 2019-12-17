@@ -5,11 +5,11 @@ DATE:               AUGUST 20, 2019
 DESCRIPTION:        Get name of specific datasets into a space separated macro!
 **********************************************************************************'''
 import pandas as pd
-import datetime
 import sqlite3
 import traceback
 import sys
-import platform
+# import platform
+import warnings
 
 
 class Formatting:
@@ -268,6 +268,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
     all_columns = []
     table_col = []
     #Append the datasets*/
+    table_list = []
     if len(table_list) > 0:
 
         for table_name in table_list:
@@ -324,43 +325,12 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
                     in {execution_time:.3g} seconds''' )
         
 
-        return total_rows    
+        return total_rows
+    else:
+         warnings.warn("No table was retrieved", RuntimeWarning)
+         table_list[1]
 
 
-'''    PROC SQL NOPRINT;
-    %put dblist is  %UPCASE(&dbList);
-    SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
-    WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
-        AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
-        %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
-        %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
-        %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
-
-    ORDER BY MEMNAME DESC
-    ;;
-    QUIT;
-    %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
-    %put &LIST_NAME;
-    #Append the datasets*/
-    data &outDsn;
-    set &LIST_NAME indsname = source; 
-    where 1
-    %if &stDt ne %then %do; and &stDt <= svcDate %end;
-    %if &edDt ne %then %do; and svcDate <= &edDt %end;
-    ;
-#add a variable indicating table name and its scope */
-    tbname = scan(source,2,'.');
-    scope = substr(tbname,5,1);
-    %if &code ne %then %do;
-    if upcase(SCOPE) in ("O","S") then do;
-        if proc1 in (&&&code) then output;
-    end; sql_id_dx
-    if upcase(SCOPE) in ("D") then do;
-        if ndcnum in (&&&code) then output;
-    end; 
-    %end;
-    run;
-%MEND; '''
 
 
 
