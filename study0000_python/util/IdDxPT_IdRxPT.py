@@ -8,8 +8,14 @@ import pandas as pd
 import sqlite3
 import traceback
 import sys
+<<<<<<< HEAD
 # import platform
 import warnings
+=======
+import platform
+from timeit import default_timer as timer
+
+>>>>>>> 741d20a89f1e4ee1339bd597f53ca369e02d7bdd
 
 
 class Formatting:
@@ -112,6 +118,9 @@ def str_to_list(str_or_list=[]):
 def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True):
     if display:
         print("Executing ",sql_expr)
+        
+    execution_time = timer()
+    
     sql_expr_lines = [line for line in sql_expr.split("\n") if line.strip()[0:2] != '--']
     sql_expr = "\n".join(sql_expr_lines)
     sql_expr = " ".join(sql_expr.split())
@@ -147,7 +156,12 @@ def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True)
         new_table_name = sql_expr[tb_name_location:].split()[0]
         num_rows = pd.read_sql_query(f'SELECT count(*) FROM {new_table_name}',db_conn).iloc[0,0]
         print(f'Table {new_table_name} now containts {num_rows} observations'.center(90,'=').center(110) )
-            
+        execution_time = timer() - execution_time
+        execution_message = f"The operation took {execution_time:.3g} seconds"
+        print(f'{execution_message:>100}')
+        return num_rows
+    
+    
         
                
 
@@ -239,8 +253,8 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
 
 
 
-        print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
-                    in {execution_time:.3g} seconds''' )
+        # print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
+        #             in {execution_time:.3g} seconds''' )
         
 
         return total_rows
@@ -335,6 +349,10 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
 
 
 # #IdAdmPT record extraction *******************'''
+def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr",
+           service_start_date_var='admdate', service_end_date_var='disdate', stDt=None, edDt=None,
+           dxVar = None, codes=None,  outDsn='outDsn'):
+
 # %MACRO IdAdmPT(dbLib = , dbList = ("CCAE","MDCR"), stDt =, edDt =, dxVar =, code=,  outDsn =);
 
 #     %local SCOPE;
