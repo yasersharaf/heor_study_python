@@ -5,11 +5,13 @@ DATE:               AUGUST 20, 2019
 DESCRIPTION:        Get name of specific datasets into a space separated macro!
 **********************************************************************************'''
 import pandas as pd
+import datetime
 import sqlite3
 import traceback
 import sys
-# import platform
-import warnings
+import platform
+from timeit import default_timer as timer
+
 
 
 class Formatting:
@@ -112,6 +114,9 @@ def str_to_list(str_or_list=[]):
 def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True):
     if display:
         print("Executing ",sql_expr)
+        
+    execution_time = timer()
+    
     sql_expr_lines = [line for line in sql_expr.split("\n") if line.strip()[0:2] != '--']
     sql_expr = "\n".join(sql_expr_lines)
     sql_expr = " ".join(sql_expr.split())
@@ -147,7 +152,12 @@ def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True)
         new_table_name = sql_expr[tb_name_location:].split()[0]
         num_rows = pd.read_sql_query(f'SELECT count(*) FROM {new_table_name}',db_conn).iloc[0,0]
         print(f'Table {new_table_name} now containts {num_rows} observations'.center(90,'=').center(110) )
-            
+        execution_time = timer() - execution_time
+        execution_message = f"The operation took {execution_time:.3g} seconds"
+        print(f'{execution_message:>100}')
+        return num_rows
+    
+    
         
                
 
@@ -239,8 +249,8 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
 
 
 
-        print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
-                    in {execution_time:.3g} seconds''' )
+        # print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
+        #             in {execution_time:.3g} seconds''' )
         
 
         return total_rows
@@ -268,7 +278,6 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
     all_columns = []
     table_col = []
     #Append the datasets*/
-    table_list = []
     if len(table_list) > 0:
 
         for table_name in table_list:
@@ -325,12 +334,43 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
                     in {execution_time:.3g} seconds''' )
         
 
-        return total_rows
-    else:
-         warnings.warn("No table was retrieved", RuntimeWarning)
-         table_list[1]
+        return total_rows    
 
 
+'''    PROC SQL NOPRINT;
+    %put dblist is  %UPCASE(&dbList);
+    SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
+    WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
+        AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
+        %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
+        %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
+        %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
+
+    ORDER BY MEMNAME DESC
+    ;;
+    QUIT;
+    %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
+    %put &LIST_NAME;
+    #Append the datasets*/
+    data &outDsn;
+    set &LIST_NAME indsname = source; 
+    where 1
+    %if &stDt ne %then %do; and &stDt <= svcDate %end;
+    %if &edDt ne %then %do; and svcDate <= &edDt %end;
+    ;
+#add a variable indicating table name and its scope */
+    tbname = scan(source,2,'.');
+    scope = substr(tbname,5,1);
+    %if &code ne %then %do;
+    if upcase(SCOPE) in ("O","S") then do;
+        if proc1 in (&&&code) then output;
+    end; sql_id_dx
+    if upcase(SCOPE) in ("D") then do;
+        if ndcnum in (&&&code) then output;
+    end; 
+    %end;
+    run;
+%MEND; '''
 
 
 
