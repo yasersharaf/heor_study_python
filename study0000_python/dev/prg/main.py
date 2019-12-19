@@ -68,6 +68,10 @@ if __name__ == "__main__":
                     service_date_var='svcdate',
                     demoraphic_vars = 'Sex, DOBYR, AGE, planTyp, Region',
                     )
+    total_rows = IdDxPT(db_conn=s.db ,dbLib='raw', dbList = "ccae,mdcr", scope = "i",
+                    service_date_var='admdate', service_end_var='disdate',
+                    stDt=s.study_start, edDt=s.study_end,
+                    outDsn='_alladm_')
     # s.db.commit()
     
     # c.execute("SELECT * FROM scd.sqlite_master;")

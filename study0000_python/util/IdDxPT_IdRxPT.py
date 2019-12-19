@@ -124,7 +124,7 @@ def execute_n_drop(db_conn=None, sql_expr="", if_exists='replace', display=True)
     try:
         db_conn.execute(sql_expr)
     except sqlite3.OperationalError:
-        # removing the comments
+        # removing the sql comments
         if "CREATE TABLE IF NOT EXISTS" not in sql_expr_upper:
             if "CREATE TABLE" in sql_expr_upper:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -194,7 +194,8 @@ def get_table_name(db_conn=None, dbLib='raw', dbList="ccae,mdcr", scope=None):
 
 #IdDxPT record extraction *******************'''
 def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
-           service_date_var='svcdate', stDt=None, edDt=None,
+           service_date_var='svcdate', service_end_var=None,
+           stDt=None, edDt=None,
            dxVar = None, codes=None,  outDsn='outDsn'):
 
     table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
@@ -202,17 +203,24 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
     print("codes:", codes)
 
     print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
-    if stDt is None:
-        stDt = pd.Timestamp(year=1900,month=1,day=1)
-    if edDt is None:
-        edDt = pd.Timestamp(year=2070,month=1,day=1)
     
+    if service_end_var is None:
+        service_end_var = service_date_var
+    if stDt is None:
+        where_date_clause = '1=1'
+    else:
+        where_date_clause = f"""{service_end_var} >= '{stDt}'"""
+    if edDt is None:
+        pass
+    else:
+        where_date_clause += f""" AND {service_date_var} <= '{edDt}'"""
     sql_select_list = []
     #Append the datasets*/
     if len(table_list) > 0:   
         sql_args = {'table_alias': '',
                     'column_prefix': '',
-                    'on_clause': ''}
+                    'on_clause': '',
+                    'join clause': ''}
         all_columns = get_union_columns(db_conn=db_conn, dbLib=dbLib, table_list=table_list)
         if codes or dxVar:
             if not (codes and dxVar):
@@ -224,8 +232,8 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
             df_code.to_sql(df_code_ds, db_conn, if_exists='replace')
             
         for table_name, table_num in zip(table_list, range(len(table_list))):
+            table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
             if codes:
-                table_col = sql_list_table_columns(db_conn=db_conn, db_tb_name=f'{dbLib}.{table_name}')
                 sql_args['column_prefix'] = 'a' + str(table_num) + '.'
                 sql_args['table_alias'] = 'AS ' + sql_args['column_prefix'][0:-1]
                 sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.dx) > 0" \
@@ -236,8 +244,8 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
                                                                        else '   NULL AS ' + col  for col in all_columns])},
 '{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name} {sql_args['table_alias']}
                 {sql_args['join clause']}
-                {sql_args['on_clause']}                                                       
-                WHERE {service_date_var} >= '{stDt}'  AND {service_date_var} <= '{edDt}'
+                {sql_args['on_clause']}
+                WHERE {where_date_clause}
             ''')
 
 
@@ -270,9 +278,13 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
 
     print(f"========= LISTING THE DATA SETS FROM",{dbLib},"LIBRARY FOR APPENDING ==========\n", *table_list)
     if stDt is None:
-        stDt = pd.Timestamp(year=1970,month=1,day=1)
+        where_date_clause = '1=1'
+    else:
+        where_date_clause = f"""{service_date_var} >= '{stDt}'"""
     if edDt is None:
-        edDt = pd.Timestamp(year=2070,month=1,day=1)
+        pass
+    else:
+        where_date_clause += f""" AND {service_date_var} <= '{edDt}'"""
     
     sql_select_list = []
     all_columns = []
@@ -313,7 +325,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
 '{dbLib}.{table_name}' as tb_name FROM {dbLib}.{table_name} {sql_args['table_alias']}
                 {sql_args['join clause']}
                 {sql_args['on_clause']}                                                       
-                WHERE SVCDATE >= '{stDt}'  AND SVCDATE <= '{edDt}'
+                WHERE {where_date_clause}
             ''')
 
 
@@ -334,87 +346,8 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
                     in {execution_time:.3g} seconds''' )
         
 
-        return total_rows    
-
-
-'''    PROC SQL NOPRINT;
-    %put dblist is  %UPCASE(&dbList);
-    SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
-    WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
-        AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
-        %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
-        %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
-        %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
-
-    ORDER BY MEMNAME DESC
-    ;;
-    QUIT;
-    %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
-    %put &LIST_NAME;
-    #Append the datasets*/
-    data &outDsn;
-    set &LIST_NAME indsname = source; 
-    where 1
-    %if &stDt ne %then %do; and &stDt <= svcDate %end;
-    %if &edDt ne %then %do; and svcDate <= &edDt %end;
-    ;
-#add a variable indicating table name and its scope */
-    tbname = scan(source,2,'.');
-    scope = substr(tbname,5,1);
-    %if &code ne %then %do;
-    if upcase(SCOPE) in ("O","S") then do;
-        if proc1 in (&&&code) then output;
-    end; sql_id_dx
-    if upcase(SCOPE) in ("D") then do;
-        if ndcnum in (&&&code) then output;
-    end; 
-    %end;
-    run;
-%MEND; '''
-
-
-
-# #IdAdmPT record extraction *******************'''
-# %MACRO IdAdmPT(dbLib = , dbList = ("CCAE","MDCR"), stDt =, edDt =, dxVar =, code=,  outDsn =);
-
-#     %local SCOPE;
-#     %let SCOPE = ("I");
-#     PROC SQL NOPRINT;
-#     %put dblist is  %UPCASE(&dbList);
-#     SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
-#     WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
-#         AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
-#         %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
-#         %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
-#         %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
-
-#     ORDER BY MEMNAME DESC
-#     ;;
-#     QUIT;
-#     %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
-#     %put &LIST_NAME;
-#     #Append the datasets*/
-#     data &outDsn;
-#     set &LIST_NAME indsname = source; 
-#     %if &code ne %then %do;array dxvar_array &dxVar;%end;
-#     where 1
-#     %if &stDt ne %then %do; and &stDt <= coalesce(disdate,admdate) %end;
-#     %if &edDt ne %then %do; and admDate <= &edDt %end;
-#     ;
-#     %if &code ne and &dxVar ne %then %do;
-#     do i = 1 to dim(dxvar_array);
-# #check ruleout?*/
-#         if dxvar_array{i} in:  &code then output;
-#         leave;
-#     end;
-#     %end;
-# #add a variable indicating table name and its scope */
-#     tbname = scan(source,2,'.');
-#     scope = substr(tbname,5,1);
-#     run;
-# %MEND;
-
-
+        return total_rows
+    
 
 # #IdAdmPT record extraction *******************'''
 # %MACRO IdCEPT(dbLib = , dbList = ("CCAE","MDCR"), stDt =, edDt =, outDsn =);
@@ -447,4 +380,3 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
 #     scope = substr(tbname,5,1);
 #     run;
 # %MEND;
-
