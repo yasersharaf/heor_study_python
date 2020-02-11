@@ -70,6 +70,9 @@ WHERE {supply_days_var}>0
 GROUP BY {ndc_var}, {supply_days_var}
 ORDER BY {ndc_var}, freq DESC;
 '''
+
+#TODO:  If two or more DAYSUPP had same frequency, keep the smallest DAYSUPP (to be conservative).			
+
     execute_n_drop(db_conn=db_conn, sql_expr=sql_statement_2_a, if_exists='replace')
        
     sql_statement_2_b = f'''--sql
@@ -77,7 +80,7 @@ CREATE TABLE _adjust_daysupp_step_2_b AS
 SELECT {ndc_var}, {supply_days_var} FROM (
     SELECT {ndc_var}, {supply_days_var}, freq, ROW_NUMBER() OVER(
                                 PARTITION BY {ndc_var}
-                                ORDER BY {ndc_var}, freq DESC
+                                ORDER BY {ndc_var}, freq DESC, {supply_days_var} ASC
                                 ) AS N
     FROM _adjust_daysupp_step_2_a
     ) AS a
@@ -210,9 +213,7 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
         where_date_clause = '1=1'
     else:
         where_date_clause = f"""{service_end_var} >= '{stDt}'"""
-    if edDt is None:
-        pass
-    else:
+    if edDt is not None:
         where_date_clause += f""" AND {service_date_var} <= '{edDt}'"""
     sql_select_list = []
     #Append the datasets*/
@@ -236,7 +237,7 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
             if codes:
                 sql_args['column_prefix'] = 'a' + str(table_num) + '.'
                 sql_args['table_alias'] = 'AS ' + sql_args['column_prefix'][0:-1]
-                sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.dx) > 0" \
+                sql_args['on_clause'] = 'ON ' + ' OR '.join([f"instr({sql_args['column_prefix']}{join_col},b{table_num}.dx) = 1" \
                                                              for join_col in [col.lower() for col in dxVar if col.lower() in [col2.lower() for col2 in table_col]]])
                 sql_args['join clause'] = f'INNER JOIN {df_code_ds} AS b{table_num}' 
             sql_select_list.append(\
@@ -250,17 +251,9 @@ def IdDxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "s,o",
 
 
         sql_id_dx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
-        # print(sql_id_dx)
 
-        execute_n_drop(db_conn=db_conn, sql_expr=sql_id_dx , if_exists='replace')
-        total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
-
-
-
-        # print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
-        #             in {execution_time:.3g} seconds''' )
+        total_rows = execute_n_drop(db_conn=db_conn, sql_expr=sql_id_dx , if_exists='replace')
         
-
         return total_rows
 
         
@@ -281,9 +274,7 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
         where_date_clause = '1=1'
     else:
         where_date_clause = f"""{service_date_var} >= '{stDt}'"""
-    if edDt is None:
-        pass
-    else:
+    if edDt is not None:
         where_date_clause += f""" AND {service_date_var} <= '{edDt}'"""
     
     sql_select_list = []
@@ -330,53 +321,33 @@ def IdRxPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr", scope = "d",
 
 
         sql_id_rx = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
-        print(sql_id_rx)
-
-        from timeit import default_timer as timer
-        execution_time = timer()
-        # db_conn.execute(sql_id_rx)
-
-        execute_n_drop(db_conn=db_conn, sql_expr=sql_id_rx , if_exists='replace')
-        total_rows = pd.read_sql_query(f"SELECT count(*) FROM {outDsn} ;", db_conn)
-
-        execution_time = timer() - execution_time
-        assert isinstance(total_rows, pd.DataFrame)
-
-        print(f'''Retrieved {list(total_rows.values)[0]} evaluated by {total_rows.columns[0]}
-                    in {execution_time:.3g} seconds''' )
+        
+        total_rows = execute_n_drop(db_conn=db_conn, sql_expr=sql_id_rx , if_exists='replace')
         
 
         return total_rows
+
+# Identify continuous enrollments
+def IdCEPT(db_conn=None ,dbLib = None, dbList = "ccae,mdcr",
+           service_date_var='dtstart', service_end_var='dtend',
+           stDt=None, edDt=None, outDsn='outDsn'):
+    if stDt is None:
+        where_date_clause = '1=1'
+    else:
+        where_date_clause = f"""{service_end_var} >= '{stDt}'"""
+    if edDt is not None:
+        where_date_clause += f""" AND {service_date_var} <= '{edDt}'"""
+    scope = 't'
+    table_list = get_table_name(db_conn=db_conn, dbLib=dbLib, scope=scope)
+    sql_select_list = []
+    for table_name in table_list:
+        sql_select_list.append(f'''
+--sql
+SELECT * FROM {dbLib}.{table_name}
+WHERE {where_date_clause}
+''')
+    sql_id_ce = f'CREATE TABLE {outDsn} AS ' + 'UNION ALL\n'.join(sql_select_list)
     
-
-# #IdAdmPT record extraction *******************'''
-# %MACRO IdCEPT(dbLib = , dbList = ("CCAE","MDCR"), stDt =, edDt =, outDsn =);
-
-#     %local SCOPE;
-#     %let SCOPE = ("T");
-#     PROC SQL NOPRINT;
-#     %put dblist is  %UPCASE(&dbList);
-#     SELECT "&dbLib.."||MEMNAME INTO: LIST_NAME SEPARATED BY ' ' FROM DICTIONARY.TABLES
-#     WHERE UPCASE(LIBNAME)=UPCASE("&dbLib")
-#         AND UPCASE(SUBSTR(MEMNAME,5,1)) IN &SCOPE
-#         %if &stDt ne %then %do; AND SUBSTR(MEMNAME,6,2) >= substr(strip(put(year(&stDt),4.)),3,2) %end;
-#         %if &edDt ne %then %do; AND SUBSTR(MEMNAME,6,2) <= substr(strip(put(year(&edDt),4.)),3,2) %end;
-#         %if &dbList ne %then %do; AND UPCASE(SUBSTR(MEMNAME,1,4)) IN %UPCASE(&dbList) %end;
-
-#     ORDER BY MEMNAME DESC
-#     ;;
-#     QUIT;
-#     %put ========= LISTING THE DATA SETS FROM &dbLib LIBRARY FOR APPENDING ==========&LIST_NAME;
-#     %put &LIST_NAME;
-#     #Append the datasets*/
-#     data &outDsn;
-#     set &LIST_NAME indsname = source; 
-#     where 1
-#     %if &stDt ne %then %do; and &stDt <= dtend %end;
-#     %if &edDt ne %then %do; and dtstart <= &edDt %end;
-#     ;
-# #add a variable indicating table name and its scope */
-#     tbname = scan(source,2,'.');
-#     scope = substr(tbname,5,1);
-#     run;
-# %MEND;
+    total_rows = execute_n_drop(db_conn=db_conn, sql_expr=sql_id_ce , if_exists='replace')
+    
+    return total_rows

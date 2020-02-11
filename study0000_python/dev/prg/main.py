@@ -72,6 +72,9 @@ if __name__ == "__main__":
                     service_date_var='admdate', service_end_var='disdate',
                     stDt=s.study_start, edDt=s.study_end,
                     outDsn='_alladm_')
+    from _03_pull_raw_data import pull_raw_data
+    pull_raw_data(study=s,
+                  id_var='enrolid')
     # s.db.commit()
     
     # c.execute("SELECT * FROM scd.sqlite_master;")
